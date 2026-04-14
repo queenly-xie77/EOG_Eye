@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EOG Driver Awareness Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f5f7fb;
+      color: #222;
+    }
+
+    .header {
+      background: #1f2937;
+      color: white;
+      padding: 20px;
+      text-align: center;
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      padding: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+
+    .status-card {
+      grid-column: span 2;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .status {
+      font-size: 36px;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+
+    .alert {
+      color: green;
+    }
+
+    .drowsy {
+      color: orange;
+    }
+
+    .fatigue {
+      color: red;
+    }
+
+    .metric {
+      font-size: 18px;
+      margin-top: 8px;
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 300px !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">Truck Driver Awareness Dashboard (EOG)</div>
+
+  <div class="container">
+    <div class="card">
+      <h3>Raw EOG Signal</h3>
+      <canvas id="rawChart"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Filtered EOG Signal</h3>
+      <canvas id="filteredChart"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Eye Closure Activity</h3>
+      <canvas id="activityChart"></canvas>
+    </div>
+
+    <div class="card status-card">
+      <h3>Driver Status</h3>
+      <div id="statusText" class="status">WAITING</div>
+      <div id="closureCount" class="metric">Long closures: 0</div>
+      <div class="metric">Repeated prolonged eye closures may indicate fatigue.</div>
+    </div>
+  </div>
+
+  <audio id="alarmAudio">
+    <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
+  </audio>
+
+  <script>
+    const rawCtx = document.getElementById("rawChart").getContext("2d");
+    const filteredCtx = document.getElementById("filteredChart").getContext("2d");
+    const activityCtx = document.getElementById("activityChart").getContext("2d");
+
+    function makeChart(ctx, label, borderColor) {
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [{
+            label: label,
+            data: [],
+            borderColor: borderColor,
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.1
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: "Time (s)"
+              }
+            },
+            y: {
+              title: {
+                display: true,
+                text: "Amplitude"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    const rawChart = makeChart(rawCtx, "Raw EOG", "blue");
+    const filteredChart = makeChart(filteredCtx, "Filtered EOG", "green");
+    const activityChart = makeChart(activityCtx, "Activity", "purple");
+
+    const statusText = document.getElementById("statusText");
+    const closureCount = document.getElementById("closureCount");
+    const alarmAudio = document.getElementById("alarmAudio");
+
+    let lastAlarmTime = 0;
+
+    function updateStatus(state, longClosures) {
+      statusText.textContent = state;
+      statusText.className = "status";
+
+      if (state === "ALERT") {
+        statusText.classList.add("alert");
+      } else if (state === "DROWSY") {
+        statusText.classList.add("drowsy");
+      } else if (state === "FATIGUE WARNING") {
+        statusText.classList.add("fatigue");
+
+        const now = Date.now();
+        if (now - lastAlarmTime > 3000) {
+          alarmAudio.play().catch(() => {});
+          lastAlarmTime = now;
+        }
+      }
+
+      closureCount.textContent = `Long closures: ${longClosures}`;
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch("/data");
+        const data = await res.json();
+
+        rawChart.data.labels = data.time;
+        rawChart.data.datasets[0].data = data.raw;
+        rawChart.update();
+
+        filteredChart.data.labels = data.time;
+        filteredChart.data.datasets[0].data = data.filtered;
+        filteredChart.update();
+
+        activityChart.data.labels = data.time;
+        activityChart.data.datasets[0].data = data.activity;
+        activityChart.update();
+
+        updateStatus(data.state, data.long_closures);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+      }
+    }
+
+    setInterval(fetchData, 200);
+  </script>
+</body>
+</html>
