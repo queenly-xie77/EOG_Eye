@@ -1,0 +1,56 @@
+from machine import ADC,Pin,PWM
+import time
+try:
+    import ulab.numpy as np
+except ImportError:
+    # Fallback if ulab isn't installed, though ulab is recommended for speed
+    np = None
+
+# 1. Hardware Config
+adc = ADC(27)  # Pin 32 is GP27
+VCC = 3.3
+GAIN = 41782
+
+# 2. Detection Settings (Calibration Required)
+# Adjust BLINK_THRESHOLD based on your plotter's spike height
+BLINK_THRESHOLD_UV = 25.0  
+MIN_BLINK_GAP_MS = 300     # Ignore double-triggers within one blink
+
+# 3. State Variables
+last_blink_time = 0
+
+def get_uv():
+    """Applies the Transfer Function from your documentation."""
+    raw = adc.read_u16()
+    # ((ADC / 2^16) - 0.5) * VCC / Gain * 1,000,000
+    uv = ((raw / 65535) - 0.5) * VCC / GAIN * 1000000
+    return uv
+
+print("--- BLINK DETECTOR ACTIVE ---")
+print("Calibrate by watching the plotter. Adjust BLINK_THRESHOLD_UV if needed.")
+
+while True:
+    current_val = get_uv()
+    current_time = time.ticks_ms()
+    
+    # Deterministic Detection Logic
+    # 1. Check if signal crosses the amplitude threshold
+    if current_val > BLINK_THRESHOLD_UV:
+        
+        # 2. Check if enough time has passed since the last detection
+        # This prevents one blink from being counted 10 times as it peaks
+        while(time.ticks_diff(current_time, last_blink_time) > MIN_BLINK_GAP_MS):
+                #instantiate PWM object and set class fields
+                pwm_pin = PWM(Pin(15),freq = 3000,duty_u16 = 65534) #100% duty cycle
+    
+                time.sleep_ms(500)
+    
+                pwm_pin.duty_u16(0)
+    
+                time.sleep_ms(500)
+                last_blink_time = current_time
+            
+    # For Thonny Plotter (Value 1: Signal, Value 2: Threshold Line)
+    print((current_val, BLINK_THRESHOLD_UV))
+    
+    time.sleep_ms(10) # 100Hz Sampling
