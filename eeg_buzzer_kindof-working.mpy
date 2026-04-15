@@ -52,5 +52,6 @@ while True:
             
     # For Thonny Plotter (Value 1: Signal, Value 2: Threshold Line)
     print((current_val, BLINK_THRESHOLD_UV))
+    print(f"{time.ticks_ms()},{current_val}")
     
     time.sleep_ms(10) # 100Hz Sampling
