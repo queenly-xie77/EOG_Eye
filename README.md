@@ -47,3 +47,12 @@ queenly distracted driving -> this dosen't have to be you -> live presentation o
 outtake conversaion:
 queenly: during that 4 hour drive to miami i could barely keep my eyes open
 Hakim:Seriously I went to massachusets, was also tired, but thanks to micosheep i was able to stay awake and arrive to my destination safely
+
+source 1:
+https://www.nhtsa.gov/book/countermeasures-that-work/drowsy-driving
+
+source 2:
+https://www.nhtsa.gov/risky-driving/drowsy-driving
+
+source 3:
+https://doi.org/10.1159/000073060
