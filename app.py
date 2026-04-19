@@ -11,17 +11,26 @@ app = Flask(__name__)
 # =========================
 # USER SETTINGS
 # =========================
-SERIAL_PORT = "/dev/tty.usbmodem1201"   
+SERIAL_PORT = "/dev/tty.usbmodem1201"
 BAUD_RATE = 115200
+# =========================
+# TUNED SETTINGS
+# =========================
 FS = 100
 WINDOW_SECONDS = 15
 MAX_SAMPLES = FS * WINDOW_SECONDS
 
-# Fatigue tuning
-BLINK_THRESHOLD_UV = 8.0
-LONG_CLOSURE_MS = 350
-FATIGUE_EVENT_COUNT = 4
-FATIGUE_WINDOW_SEC = 20
+# Blink-rate tuning based on medical averages (SBR)
+BLINK_THRESHOLD_UV = 10.0      # Slightly increased to avoid noise/muscle jitter
+BLINK_REFRACTORY_MS = 300      # Increased to 300ms (typical blink duration is 100-400ms)
+BLINK_WINDOW_SEC = 15          # Expanded window to 15s for a more stable "average"
+
+# Thresholds for a 15-second rolling window:
+# Normal: ~3-4 blinks in 15s (12-16 per min)
+# Drowsy: 6+ blinks in 15s (24+ per min)
+# Extreme: 10+ blinks in 15s (40+ per min)
+DROWSY_BLINK_COUNT = 10        
+EXTREME_BLINK_COUNT = 30
 
 # =========================
 # GLOBAL DATA BUFFERS
@@ -33,13 +42,13 @@ activity_buf = deque(maxlen=MAX_SAMPLES)
 
 status_data = {
     "state": "WAITING",
-    "long_closures": 0,
+    "blink_count": 0,
     "last_update": 0
 }
 
-long_closure_events = deque()
-eye_closed = False
-eye_close_start = None
+blink_events = deque()
+blink_active = False
+last_blink_time = -999.0
 
 # =========================
 # FILTER SETUP
@@ -85,49 +94,53 @@ def parse_line(line):
 # SIGNAL PROCESSING
 # =========================
 def process_sample(t, raw_uv):
-    global zi_state, eye_closed, eye_close_start
+    global zi_state, blink_active, last_blink_time
 
-    # Bandpass filter
+    # 1. Bandpass filter
     y, zi_state_new = lfilter(b_bp, a_bp, [raw_uv], zi=zi_state)
     zi_state = zi_state_new
     filt_uv = float(y[0])
-
     activity = abs(filt_uv)
 
+    # 2. Update Buffers
     t_buf.append(t)
     raw_buf.append(raw_uv)
     filt_buf.append(filt_uv)
     activity_buf.append(activity)
 
-    # Eye closure logic
+    # 3. Blink Detection
     if activity > BLINK_THRESHOLD_UV:
-        if not eye_closed:
-            eye_closed = True
-            eye_close_start = t
+        if (not blink_active) and ((t - last_blink_time) * 1000.0 > BLINK_REFRACTORY_MS):
+            blink_events.append(t)
+            last_blink_time = t
+            blink_active = True
     else:
-        if eye_closed:
-            duration_ms = (t - eye_close_start) * 1000.0
-            if duration_ms >= LONG_CLOSURE_MS:
-                long_closure_events.append(t)
-            eye_closed = False
-            eye_close_start = None
+        blink_active = False
 
-    # Remove old events
-    while long_closure_events and (t - long_closure_events[0]) > FATIGUE_WINDOW_SEC:
-        long_closure_events.popleft()
+    # 4. Clean old blinks
+    while blink_events and (t - blink_events[0]) > BLINK_WINDOW_SEC:
+        blink_events.popleft()
 
-    long_count = len(long_closure_events)
+    blink_count = len(blink_events)
 
-    if long_count >= FATIGUE_EVENT_COUNT:
-        state = "FATIGUE WARNING"
-    elif long_count >= 2:
-        state = "DROWSY"
+    # 5. Logic
+    if blink_count >= EXTREME_BLINK_COUNT:
+        state = "EXTREME!!"
+    elif blink_count >= DROWSY_BLINK_COUNT:
+        state = "DROWSY  "
     else:
-        state = "ALERT"
+        state = "ALERT   "
 
-    status_data["state"] = state
-    status_data["long_closures"] = long_count
-    status_data["last_update"] = time.time()
+    status_data.update({"state": state, "blink_count": blink_count, "last_update": time.time()})
+
+    # 6. TERMINAL VISUALIZER
+    # This creates a small progress bar showing the position in the 15s window
+    window_pos = t % BLINK_WINDOW_SEC
+    progress = int((window_pos / BLINK_WINDOW_SEC) * 20)
+    bar = "█" * progress + "-" * (20 - progress)
+    
+    # Print status line to terminal without creating new lines
+    print(f"\r[{bar}] Time: {t:7.2f}s | Window Pos: {window_pos:4.1f}s | Blinks: {blink_count:2} | State: {state}", end="")
 
 def serial_reader():
     global ser
@@ -175,10 +188,13 @@ def data():
         "filtered": list(filt_buf),
         "activity": list(activity_buf),
         "state": status_data["state"],
-        "long_closures": status_data["long_closures"]
+        "blink_count": status_data["blink_count"]
     })
 
 if __name__ == "__main__":
     thread = threading.Thread(target=serial_reader, daemon=True)
     thread.start()
-    app.run(debug=False, host="127.0.0.1", port=5060)
+    app.run(debug=False, host="127.0.0.1", port=5050)
+    # Kill the port:
+    # lsof -i :5000
+    # kill -9 <PID>
